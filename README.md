@@ -2,6 +2,36 @@
 
 An end-to-end data engineering project built using the Brazilian Olist e-commerce dataset.
 
+## Use Case Objective
+
+Build an end-to-end batch data engineering pipeline for the Olist e-commerce dataset using:
+
+- Airflow for orchestration
+- Python/Pandas for ingestion and Parquet conversion
+- Snowflake for cloud data warehousing
+- dbt for transformation and data quality
+- Terraform for Snowflake infrastructure provisioning
+- Docker for the local execution environment
+
+## Use Case Flow
+
+```text
+Olist CSV
+   ↓
+Airflow dataset discovery
+   ↓
+CSV → Parquet
+   ↓
+Snowflake Internal Stage
+   ↓
+RAW tables
+   ↓
+dbt STAGING models
+   ↓
+dbt data-quality tests
+   ↓
+ANALYTICS fact/dimension tables
+
 ## Architecture
 
 ```mermaid

@@ -5,7 +5,7 @@ olist_csv_to_parquet:
     start_date: 2026-08-01
     retries: 1
 
-  description: "Dynamic Olist CSV to Parquet and Snowflake RAW ingestion pipeline"
+  description: "End-to-end Olist ingestion, transformation, and analytics pipeline"
 
   schedule: null
 
@@ -87,3 +87,59 @@ olist_csv_to_parquet:
 
       expand:
         op_args: copy_parquet_to_raw.output
+
+    
+    - task_id: dbt_run_staging
+
+      operator: airflow.providers.standard.operators.bash.BashOperator
+
+      bash_command: >
+        cd /opt/airflow/dbt &&
+        dbt run --select staging
+        --project-dir /opt/airflow/dbt
+        --profiles-dir /opt/airflow/dbt
+
+      dependencies:
+        - validate_raw_load
+
+
+    - task_id: dbt_test_staging
+
+      operator: airflow.providers.standard.operators.bash.BashOperator
+
+      bash_command: >
+        cd /opt/airflow/dbt &&
+        dbt test --select staging
+        --project-dir /opt/airflow/dbt
+        --profiles-dir /opt/airflow/dbt
+
+      dependencies:
+        - dbt_run_staging
+
+
+    - task_id: dbt_run_marts
+
+      operator: airflow.providers.standard.operators.bash.BashOperator
+
+      bash_command: >
+        cd /opt/airflow/dbt &&
+        dbt run --select marts
+        --project-dir /opt/airflow/dbt
+        --profiles-dir /opt/airflow/dbt
+
+      dependencies:
+        - dbt_test_staging
+
+
+    - task_id: dbt_test_marts
+
+      operator: airflow.providers.standard.operators.bash.BashOperator
+
+      bash_command: >
+        cd /opt/airflow/dbt &&
+        dbt test --select marts
+        --project-dir /opt/airflow/dbt
+        --profiles-dir /opt/airflow/dbt
+
+      dependencies:
+        - dbt_run_marts

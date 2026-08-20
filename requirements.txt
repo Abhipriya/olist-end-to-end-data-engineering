@@ -1,0 +1,6 @@
+pandas
+pyarrow
+dag-factory
+apache-airflow-providers-snowflake
+snowflake-connector-python
+dbt-snowflake

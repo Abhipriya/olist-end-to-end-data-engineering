@@ -1,0 +1,143 @@
+# ============================================================
+# SECRETS
+# ============================================================
+
+# RSA private keys
+secrets/
+*.p8
+*.pem
+*.key
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Terraform variables containing credentials
+terraform/terraform.tfvars
+terraform/*.tfvars
+!terraform/*.tfvars.example
+
+
+# ============================================================
+# TERRAFORM
+# ============================================================
+
+# Terraform working directory
+terraform/.terraform/
+
+# Terraform state files
+terraform/*.tfstate
+terraform/*.tfstate.*
+
+# Terraform crash logs
+terraform/crash.log
+terraform/crash.*.log
+
+# Terraform override files
+terraform/override.tf
+terraform/override.tf.json
+terraform/*_override.tf
+terraform/*_override.tf.json
+
+# Terraform plan files
+terraform/*.tfplan
+terraform/*.plan
+
+
+# ============================================================
+# PYTHON
+# ============================================================
+
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+*.egg-info/
+dist/
+build/
+
+
+# ============================================================
+# AIRFLOW
+# ============================================================
+
+# Airflow logs
+logs/
+
+# Airflow local configuration
+airflow.cfg
+
+# Airflow database
+airflow.db
+airflow.db-journal
+
+# Airflow generated files
+airflow-webserver.pid
+
+
+# ============================================================
+# DBT
+# ============================================================
+
+# dbt generated files
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+
+# dbt local profiles
+dbt/profiles.yml
+
+
+# ============================================================
+# DATA
+# ============================================================
+
+# Olist datasets can be large
+data/formatted/
+data/processed/
+
+# Keep raw Olist datasets out of Git
+data/landing/
+
+
+# ============================================================
+# IDE / EDITOR
+# ============================================================
+
+.vscode/
+.idea/
+
+# VS Code local settings
+*.code-workspace
+
+
+# ============================================================
+# OPERATING SYSTEM
+# ============================================================
+
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+
+# ============================================================
+# DOCKER
+# ============================================================
+
+# Docker local environment files
+docker-compose.override.yml
+
+
+# dbt local files
+dbt/.user.yml

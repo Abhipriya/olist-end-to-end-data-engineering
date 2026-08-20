@@ -1,0 +1,22 @@
+version: 2
+
+sources:
+  - name: olist_raw
+    database: OLIST_ECOMMERCE
+    schema: RAW
+
+    tables:
+      - name: customers
+        identifier: RAW_CUSTOMERS
+
+      - name: orders
+        identifier: RAW_ORDERS
+
+      - name: order_items
+        identifier: RAW_ORDER_ITEMS
+
+      - name: order_payments
+        identifier: RAW_ORDER_PAYMENTS
+
+      - name: products
+        identifier: RAW_PRODUCTS

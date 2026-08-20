@@ -1,0 +1,89 @@
+olist_csv_to_parquet:
+
+  default_args:
+    owner: "data-engineering"
+    start_date: 2026-08-01
+    retries: 1
+
+  description: "Dynamic Olist CSV to Parquet and Snowflake RAW ingestion pipeline"
+
+  schedule: null
+
+  catchup: false
+
+  max_active_runs: 1
+
+  tags:
+    - olist
+    - use_case_02
+    - ingestion
+
+  tasks:
+
+    - task_id: discover_datasets
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: discover_datasets
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+
+    - task_id: csv_to_parquet
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: csv_to_parquet
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+      expand:
+        op_args: discover_datasets.output
+
+
+    - task_id: upload_parquet_to_stage
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: upload_parquet_to_stage
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+      expand:
+        op_args: csv_to_parquet.output
+
+
+    - task_id: create_raw_table
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: create_raw_table
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+      expand:
+        op_args: upload_parquet_to_stage.output
+
+
+    - task_id: copy_parquet_to_raw
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: copy_parquet_to_raw
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+      expand:
+        op_args: create_raw_table.output
+
+
+    - task_id: validate_raw_load
+
+      operator: airflow.providers.standard.operators.python.PythonOperator
+
+      python_callable_name: validate_raw_load
+
+      python_callable_file: /opt/airflow/dags/olist_tasks.py
+
+      expand:
+        op_args: copy_parquet_to_raw.output

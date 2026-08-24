@@ -159,11 +159,21 @@ def upload_parquet_to_stage(dataset):
 
 def copy_parquet_to_raw(dataset):
     """
-    Load staged Parquet into Terraform-created RAW table.
+    Load staged Parquet into a Terraform-created RAW table.
+
+    If the source filename contains "product":
+        replace existing table data.
+
+    Otherwise:
+        append to existing table data.
     """
 
     stage_path = dataset["stage_path"]
     table_name = dataset["table_name"]
+
+    csv_filename = Path(
+        dataset["csv_path"]
+    ).name.lower()
 
     full_table_name = (
         f"{SNOWFLAKE_DATABASE}."
@@ -179,14 +189,43 @@ def copy_parquet_to_raw(dataset):
 
     hook = get_snowflake_hook()
 
-    print(
-        f"Clearing existing data from: "
-        f"{full_table_name}"
+    result = hook.get_first(
+        f"SELECT COUNT(*) FROM {full_table_name}"
     )
 
-    hook.run(
-        f"TRUNCATE TABLE {full_table_name}"
-    )
+    rows_before_load = result[0]
+
+    if "product" in csv_filename:
+
+        load_mode = "replace"
+
+        print(
+            f"Product file detected: "
+            f"{csv_filename}"
+        )
+
+        print(
+            f"Clearing existing data from "
+            f"{full_table_name}"
+        )
+
+        hook.run(
+            f"TRUNCATE TABLE {full_table_name}"
+        )
+
+    else:
+
+        load_mode = "append"
+
+        print(
+            f"Non-product file detected: "
+            f"{csv_filename}"
+        )
+
+        print(
+            f"Appending to "
+            f"{full_table_name}"
+        )
 
     sql = f"""
         COPY INTO {full_table_name}
@@ -199,28 +238,30 @@ def copy_parquet_to_raw(dataset):
         FORCE = TRUE
     """
 
-    print(f"Loading: {stage_path}")
-    print(f"Target table: {full_table_name}")
-
     hook.run(sql)
 
     print(
-        f"Loaded data into: {full_table_name}"
+        f"Loaded data into: "
+        f"{full_table_name}"
     )
 
     return [{
         **dataset,
         "full_table_name": full_table_name,
+        "load_mode": load_mode,
+        "rows_before_load": rows_before_load,
     }]
-
 
 def validate_raw_load(dataset):
     """
-    Validate RAW table row count.
+    Validate RAW table row count based on load mode.
     """
 
     full_table_name = dataset["full_table_name"]
-    expected_rows = dataset["row_count"]
+    source_rows = dataset["row_count"]
+
+    load_mode = dataset["load_mode"]
+    rows_before_load = dataset["rows_before_load"]
 
     result = get_snowflake_hook().get_first(
         f"SELECT COUNT(*) FROM {full_table_name}"
@@ -228,7 +269,18 @@ def validate_raw_load(dataset):
 
     actual_rows = result[0]
 
+    if load_mode == "replace":
+        expected_rows = source_rows
+
+    else:
+        expected_rows = (
+            rows_before_load + source_rows
+        )
+
     print(f"Table: {full_table_name}")
+    print(f"Load mode: {load_mode}")
+    print(f"Rows before: {rows_before_load}")
+    print(f"Source rows: {source_rows}")
     print(f"Expected rows: {expected_rows}")
     print(f"Actual rows: {actual_rows}")
 

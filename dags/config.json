@@ -1,0 +1,46 @@
+{
+  "customers": {
+    "table_name": "RAW_CUSTOMERS",
+    "load_strategy": "append",
+    "database": "OLIST_ECOMMERCE",
+    "schema": "RAW",
+    "stage": "OLIST_STAGE",
+    "file_format": "OLIST_PARQUET_FORMAT"
+  },
+
+  "orders": {
+    "table_name": "RAW_ORDERS",
+    "load_strategy": "append",
+    "database": "OLIST_ECOMMERCE",
+    "schema": "RAW",
+    "stage": "OLIST_STAGE",
+    "file_format": "OLIST_PARQUET_FORMAT"
+  },
+
+  "order_items": {
+    "table_name": "RAW_ORDER_ITEMS",
+    "load_strategy": "append",
+    "database": "OLIST_ECOMMERCE",
+    "schema": "RAW",
+    "stage": "OLIST_STAGE",
+    "file_format": "OLIST_PARQUET_FORMAT"
+  },
+
+  "order_payments": {
+    "table_name": "RAW_ORDER_PAYMENTS",
+    "load_strategy": "append",
+    "database": "OLIST_ECOMMERCE",
+    "schema": "RAW",
+    "stage": "OLIST_STAGE",
+    "file_format": "OLIST_PARQUET_FORMAT"
+  },
+
+  "products": {
+    "table_name": "RAW_PRODUCTS",
+    "load_strategy": "delete_insert",
+    "database": "OLIST_ECOMMERCE",
+    "schema": "RAW",
+    "stage": "OLIST_STAGE",
+    "file_format": "OLIST_PARQUET_FORMAT"
+  }
+}

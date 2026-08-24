@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -7,17 +8,22 @@ from snowflake_config import get_snowflake_hook
 
 LANDING_ROOT = Path("/opt/airflow/data/landing")
 FORMATTED_ROOT = Path("/opt/airflow/data/formatted")
+CONFIG_FILE = Path("/opt/airflow/dags/config.json")
 
-SNOWFLAKE_DATABASE = "OLIST_ECOMMERCE"
-SNOWFLAKE_SCHEMA = "RAW"
-SNOWFLAKE_STAGE = "OLIST_STAGE"
-SNOWFLAKE_FILE_FORMAT = "OLIST_PARQUET_FORMAT"
+def load_config():
+    """
+    Load dataset configuration from config.json.
+    """
 
+    with open(CONFIG_FILE, "r") as file:
+        return json.load(file)
 
 def discover_datasets():
     """
-    Discover CSV datasets from the landing directory.
+    Discover all CSV files for each configured dataset.
     """
+
+    config = load_config()
 
     datasets = []
 
@@ -26,23 +32,52 @@ def discover_datasets():
         if not folder.is_dir():
             continue
 
-        csv_files = list(folder.glob("*.csv"))
+        dataset_name = folder.name
 
-        if len(csv_files) == 0:
-            print(f"Skipping {folder.name}: no CSV found")
+        if dataset_name not in config:
+            print(
+                f"Skipping {dataset_name}: "
+                f"no configuration found"
+            )
             continue
 
-        if len(csv_files) > 1:
-            raise ValueError(
-                f"{folder} contains more than one CSV file."
-            )
+        csv_files = sorted(
+            folder.glob("*.csv")
+        )
 
-        csv_file = csv_files[0]
+        if len(csv_files) == 0:
+            print(
+                f"Skipping {dataset_name}: "
+                f"no CSV files found"
+            )
+            continue
+
+        dataset_config = config[dataset_name]
 
         dataset = {
-            "dataset_name": folder.name,
-            "csv_path": str(csv_file),
-            "table_name": f"RAW_{folder.name.upper()}",
+            "dataset_name": dataset_name,
+            "csv_paths": [
+                str(csv_file)
+                for csv_file in csv_files
+            ],
+            "table_name": (
+                dataset_config["table_name"]
+            ),
+            "load_strategy": (
+                dataset_config["load_strategy"]
+            ),
+            "database": (
+                dataset_config["database"]
+            ),
+            "schema": (
+                dataset_config["schema"]
+            ),
+            "stage": (
+                dataset_config["stage"]
+            ),
+            "file_format": (
+                dataset_config["file_format"]
+            ),
         }
 
         datasets.append([dataset])
@@ -52,21 +87,27 @@ def discover_datasets():
             "No datasets found in landing directory."
         )
 
-    print(f"Discovered {len(datasets)} datasets")
+    print(
+        f"Discovered {len(datasets)} datasets"
+    )
 
     for item in datasets:
-        print(item[0])
+        dataset = item[0]
+
+        print(
+            f"{dataset['dataset_name']}: "
+            f"{len(dataset['csv_paths'])} CSV file(s)"
+        )
 
     return datasets
 
-
 def csv_to_parquet(dataset):
     """
-    Convert one CSV dataset into Parquet.
+    Convert all CSV files of one dataset into Parquet files.
     """
 
     dataset_name = dataset["dataset_name"]
-    csv_path = Path(dataset["csv_path"])
+    csv_paths = dataset["csv_paths"]
 
     output_directory = (
         FORMATTED_ROOT / dataset_name
@@ -77,114 +118,148 @@ def csv_to_parquet(dataset):
         exist_ok=True,
     )
 
-    parquet_path = (
-        output_directory
-        / f"{csv_path.stem}.parquet"
+    parquet_paths = []
+    total_rows = 0
+
+    for csv_path_str in csv_paths:
+
+        csv_path = Path(csv_path_str)
+
+        parquet_path = (
+            output_directory
+            / f"{csv_path.stem}.parquet"
+        )
+
+        print(f"Reading: {csv_path}")
+
+        df = pd.read_csv(csv_path)
+
+        print(f"Rows: {len(df)}")
+        print(f"Columns: {len(df.columns)}")
+
+        df.to_parquet(
+            parquet_path,
+            engine="pyarrow",
+            index=False,
+        )
+
+        print(f"Created: {parquet_path}")
+
+        parquet_paths.append(
+            str(parquet_path)
+        )
+
+        total_rows += len(df)
+
+    print(
+        f"Dataset {dataset_name}: "
+        f"{len(parquet_paths)} file(s), "
+        f"{total_rows} total rows"
     )
-
-    print(f"Dataset: {dataset_name}")
-    print(f"Reading: {csv_path}")
-
-    df = pd.read_csv(csv_path)
-
-    print(f"Rows: {len(df)}")
-    print(f"Columns: {len(df.columns)}")
-
-    df.to_parquet(
-        parquet_path,
-        engine="pyarrow",
-        index=False,
-    )
-
-    print(f"Created: {parquet_path}")
 
     return [{
-        "dataset_name": dataset_name,
-        "csv_path": str(csv_path),
-        "parquet_path": str(parquet_path),
-        "table_name": dataset["table_name"],
-        "row_count": len(df),
+        **dataset,
+        "parquet_paths": parquet_paths,
+        "row_count": total_rows,
     }]
 
 
 def upload_parquet_to_stage(dataset):
     """
-    Upload one Parquet file to Snowflake stage.
+    Upload all Parquet files of one dataset
+    to the Snowflake internal stage.
     """
 
-    parquet_path = Path(
-        dataset["parquet_path"]
-    )
-
     dataset_name = dataset["dataset_name"]
+    parquet_paths = dataset["parquet_paths"]
 
-    if not parquet_path.exists():
-        raise FileNotFoundError(
-            f"Parquet file not found: {parquet_path}"
-        )
+    database = dataset["database"]
+    schema = dataset["schema"]
+    stage = dataset["stage"]
 
     stage_path = (
-        f"@{SNOWFLAKE_DATABASE}."
-        f"{SNOWFLAKE_SCHEMA}."
-        f"{SNOWFLAKE_STAGE}/"
+        f"@{database}."
+        f"{schema}."
+        f"{stage}/"
         f"{dataset_name}"
     )
 
-    file_uri = f"file://{parquet_path}"
+    hook = get_snowflake_hook()
 
-    sql = f"""
-        PUT '{file_uri}'
-        {stage_path}
-        AUTO_COMPRESS = FALSE
-        OVERWRITE = TRUE
-    """
+    staged_files = []
 
-    print(f"Uploading: {parquet_path}")
-    print(f"Stage: {stage_path}")
+    for parquet_path_str in parquet_paths:
 
-    get_snowflake_hook().run(sql)
+        parquet_path = Path(parquet_path_str)
+
+        if not parquet_path.exists():
+            raise FileNotFoundError(
+                f"Parquet file not found: {parquet_path}"
+            )
+
+        file_uri = f"file://{parquet_path}"
+
+        sql = f"""
+            PUT '{file_uri}'
+            {stage_path}
+            AUTO_COMPRESS = FALSE
+            OVERWRITE = TRUE
+        """
+
+        print(f"Uploading: {parquet_path}")
+        print(f"Stage: {stage_path}")
+
+        hook.run(sql)
+
+        staged_file = (
+            f"{stage_path}/{parquet_path.name}"
+        )
+
+        staged_files.append(staged_file)
+
+        print(
+            f"Uploaded {parquet_path.name}"
+        )
 
     print(
-        f"Uploaded {parquet_path.name} "
-        f"to {stage_path}"
+        f"Dataset {dataset_name}: "
+        f"{len(staged_files)} file(s) uploaded"
     )
 
     return [{
         **dataset,
-        "stage_path": (
-            f"{stage_path}/{parquet_path.name}"
-        ),
+        "stage_paths": staged_files,
     }]
-
 
 def copy_parquet_to_raw(dataset):
     """
-    Load staged Parquet into a Terraform-created RAW table.
+    Load all staged Parquet files into the RAW table.
 
-    If the source filename contains "product":
-        replace existing table data.
+    delete_insert:
+        Clear the table once, then load all current files.
 
-    Otherwise:
-        append to existing table data.
+    append:
+        Keep existing data and append all current files.
     """
 
-    stage_path = dataset["stage_path"]
+    stage_paths = dataset["stage_paths"]
     table_name = dataset["table_name"]
+    load_strategy = dataset["load_strategy"]
 
-    csv_filename = Path(
-        dataset["csv_path"]
-    ).name.lower()
+    database = dataset["database"]
+    schema = dataset["schema"]
+    file_format = dataset["file_format"]
 
     full_table_name = (
-        f"{SNOWFLAKE_DATABASE}."
-        f"{SNOWFLAKE_SCHEMA}."
+        f"{database}."
+        f"{schema}."
         f"{table_name}"
     )
 
-    file_format = (
-        f"{SNOWFLAKE_DATABASE}."
-        f"{SNOWFLAKE_SCHEMA}."
-        f"{SNOWFLAKE_FILE_FORMAT}"
+    full_file_format = (
+        f"{database}."
+        f"{schema}."
+        f"{file_format}"
     )
 
     hook = get_snowflake_hook()
@@ -195,17 +270,10 @@ def copy_parquet_to_raw(dataset):
 
     rows_before_load = result[0]
 
-    if "product" in csv_filename:
-
-        load_mode = "replace"
+    if load_strategy == "delete_insert":
 
         print(
-            f"Product file detected: "
-            f"{csv_filename}"
-        )
-
-        print(
-            f"Clearing existing data from "
+            f"Delete-insert strategy: "
             f"{full_table_name}"
         )
 
@@ -213,54 +281,65 @@ def copy_parquet_to_raw(dataset):
             f"TRUNCATE TABLE {full_table_name}"
         )
 
-    else:
-
-        load_mode = "append"
+    elif load_strategy == "append":
 
         print(
-            f"Non-product file detected: "
-            f"{csv_filename}"
-        )
-
-        print(
-            f"Appending to "
+            f"Append strategy: "
             f"{full_table_name}"
         )
 
-    sql = f"""
-        COPY INTO {full_table_name}
-        FROM {stage_path}
-        FILE_FORMAT = (
-            FORMAT_NAME = '{file_format}'
+    else:
+        raise ValueError(
+            f"Unsupported load strategy: "
+            f"{load_strategy}"
         )
-        MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
-        ON_ERROR = ABORT_STATEMENT
-        FORCE = TRUE
-    """
 
-    hook.run(sql)
+    for stage_path in stage_paths:
+
+        sql = f"""
+            COPY INTO {full_table_name}
+            FROM {stage_path}
+            FILE_FORMAT = (
+                FORMAT_NAME = '{full_file_format}'
+            )
+            MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
+            ON_ERROR = ABORT_STATEMENT
+            FORCE = TRUE
+        """
+
+        print(
+            f"Loading: {stage_path}"
+        )
+
+        hook.run(sql)
 
     print(
-        f"Loaded data into: "
-        f"{full_table_name}"
+        f"Loaded {len(stage_paths)} file(s) "
+        f"into {full_table_name}"
     )
 
     return [{
         **dataset,
         "full_table_name": full_table_name,
-        "load_mode": load_mode,
         "rows_before_load": rows_before_load,
     }]
 
+
 def validate_raw_load(dataset):
     """
-    Validate RAW table row count based on load mode.
+    Validate the RAW table row count.
+
+    delete_insert:
+        expected rows = rows from current batch
+
+    append:
+        expected rows = old rows + current batch rows
     """
 
     full_table_name = dataset["full_table_name"]
-    source_rows = dataset["row_count"]
+    load_strategy = dataset["load_strategy"]
 
-    load_mode = dataset["load_mode"]
+    source_rows = dataset["row_count"]
     rows_before_load = dataset["rows_before_load"]
 
     result = get_snowflake_hook().get_first(
@@ -269,18 +348,24 @@ def validate_raw_load(dataset):
 
     actual_rows = result[0]
 
-    if load_mode == "replace":
+    if load_strategy == "delete_insert":
         expected_rows = source_rows
 
-    else:
+    elif load_strategy == "append":
         expected_rows = (
             rows_before_load + source_rows
         )
 
+    else:
+        raise ValueError(
+            f"Unsupported load strategy: "
+            f"{load_strategy}"
+        )
+
     print(f"Table: {full_table_name}")
-    print(f"Load mode: {load_mode}")
-    print(f"Rows before: {rows_before_load}")
-    print(f"Source rows: {source_rows}")
+    print(f"Load strategy: {load_strategy}")
+    print(f"Rows before load: {rows_before_load}")
+    print(f"Current batch rows: {source_rows}")
     print(f"Expected rows: {expected_rows}")
     print(f"Actual rows: {actual_rows}")
 

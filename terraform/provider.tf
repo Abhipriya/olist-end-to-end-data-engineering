@@ -21,6 +21,7 @@ provider "snowflake" {
   role = var.snowflake_role
 
   preview_features_enabled = [
-    "snowflake_file_format_parquet_resource"
+    "snowflake_file_format_parquet_resource",
+    "snowflake_table_resource"
   ]
 }

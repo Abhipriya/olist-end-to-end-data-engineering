@@ -2,30 +2,21 @@ from pathlib import Path
 
 import pandas as pd
 
-from airflow.providers.snowflake.hooks.snowflake import SnowflakeHook
+from snowflake_config import get_snowflake_hook
 
 
 LANDING_ROOT = Path("/opt/airflow/data/landing")
 FORMATTED_ROOT = Path("/opt/airflow/data/formatted")
 
+SNOWFLAKE_DATABASE = "OLIST_ECOMMERCE"
+SNOWFLAKE_SCHEMA = "RAW"
+SNOWFLAKE_STAGE = "OLIST_STAGE"
+SNOWFLAKE_FILE_FORMAT = "OLIST_PARQUET_FORMAT"
+
 
 def discover_datasets():
     """
-    Find every folder inside the landing directory.
-
-    Rule:
-    Each dataset folder must contain exactly one CSV file.
-
-    Returns data in this shape:
-
-    [
-        [dataset_1],
-        [dataset_2],
-        ...
-    ]
-
-    The nested list structure is intentional because DAG Factory
-    uses it as positional arguments for dynamic task mapping.
+    Discover CSV datasets from the landing directory.
     """
 
     datasets = []
@@ -54,11 +45,12 @@ def discover_datasets():
             "table_name": f"RAW_{folder.name.upper()}",
         }
 
-        # One list = positional arguments for one mapped task
         datasets.append([dataset])
 
     if not datasets:
-        raise ValueError("No datasets found in landing directory.")
+        raise ValueError(
+            "No datasets found in landing directory."
+        )
 
     print(f"Discovered {len(datasets)} datasets")
 
@@ -70,21 +62,24 @@ def discover_datasets():
 
 def csv_to_parquet(dataset):
     """
-    Convert one discovered CSV dataset into Parquet.
+    Convert one CSV dataset into Parquet.
     """
 
     dataset_name = dataset["dataset_name"]
     csv_path = Path(dataset["csv_path"])
 
-    output_directory = FORMATTED_ROOT / dataset_name
+    output_directory = (
+        FORMATTED_ROOT / dataset_name
+    )
 
     output_directory.mkdir(
         parents=True,
         exist_ok=True,
     )
 
-    parquet_path = output_directory / (
-        csv_path.stem + ".parquet"
+    parquet_path = (
+        output_directory
+        / f"{csv_path.stem}.parquet"
     )
 
     print(f"Dataset: {dataset_name}")
@@ -114,10 +109,13 @@ def csv_to_parquet(dataset):
 
 def upload_parquet_to_stage(dataset):
     """
-    Upload one Parquet file to the Snowflake internal stage.
+    Upload one Parquet file to Snowflake stage.
     """
 
-    parquet_path = Path(dataset["parquet_path"])
+    parquet_path = Path(
+        dataset["parquet_path"]
+    )
+
     dataset_name = dataset["dataset_name"]
 
     if not parquet_path.exists():
@@ -126,7 +124,10 @@ def upload_parquet_to_stage(dataset):
         )
 
     stage_path = (
-        f"@OLIST_ECOMMERCE.RAW.OLIST_STAGE/{dataset_name}"
+        f"@{SNOWFLAKE_DATABASE}."
+        f"{SNOWFLAKE_SCHEMA}."
+        f"{SNOWFLAKE_STAGE}/"
+        f"{dataset_name}"
     )
 
     file_uri = f"file://{parquet_path}"
@@ -141,91 +142,50 @@ def upload_parquet_to_stage(dataset):
     print(f"Uploading: {parquet_path}")
     print(f"Stage: {stage_path}")
 
-    hook = SnowflakeHook(
-        snowflake_conn_id="snowflake_default"
-    )
-
-    hook.run(sql)
+    get_snowflake_hook().run(sql)
 
     print(
         f"Uploaded {parquet_path.name} "
         f"to {stage_path}"
     )
 
-    result = {
+    return [{
         **dataset,
         "stage_path": (
             f"{stage_path}/{parquet_path.name}"
         ),
-    }
-
-    return [result]
-
-
-def create_raw_table(dataset):
-    """
-    Create one RAW Snowflake table by inferring the schema
-    from the staged Parquet file.
-    """
-
-    table_name = dataset["table_name"]
-    stage_path = dataset["stage_path"]
-
-    full_table_name = (
-        f"OLIST_ECOMMERCE.RAW.{table_name}"
-    )
-
-    file_format = (
-        "OLIST_ECOMMERCE.RAW.OLIST_PARQUET_FORMAT"
-    )
-
-    sql = f"""
-        CREATE OR REPLACE TABLE {full_table_name}
-        USING TEMPLATE (
-            SELECT ARRAY_AGG(
-                OBJECT_CONSTRUCT(*)
-            )
-            WITHIN GROUP (
-                ORDER BY order_id
-            )
-            FROM TABLE(
-                INFER_SCHEMA(
-                    LOCATION => '{stage_path}',
-                    FILE_FORMAT => '{file_format}'
-                )
-            )
-        )
-    """
-
-    print(f"Creating RAW table: {full_table_name}")
-    print(f"Inferring schema from: {stage_path}")
-
-    hook = SnowflakeHook(
-        snowflake_conn_id="snowflake_default"
-    )
-
-    hook.run(sql)
-
-    print(f"Created table: {full_table_name}")
-
-    result = {
-        **dataset,
-        "full_table_name": full_table_name,
-    }
-
-    return [result]
+    }]
 
 
 def copy_parquet_to_raw(dataset):
     """
-    Load one staged Parquet file into its RAW Snowflake table.
+    Load staged Parquet into Terraform-created RAW table.
     """
 
     stage_path = dataset["stage_path"]
-    full_table_name = dataset["full_table_name"]
+    table_name = dataset["table_name"]
+
+    full_table_name = (
+        f"{SNOWFLAKE_DATABASE}."
+        f"{SNOWFLAKE_SCHEMA}."
+        f"{table_name}"
+    )
 
     file_format = (
-        "OLIST_ECOMMERCE.RAW.OLIST_PARQUET_FORMAT"
+        f"{SNOWFLAKE_DATABASE}."
+        f"{SNOWFLAKE_SCHEMA}."
+        f"{SNOWFLAKE_FILE_FORMAT}"
+    )
+
+    hook = get_snowflake_hook()
+
+    print(
+        f"Clearing existing data from: "
+        f"{full_table_name}"
+    )
+
+    hook.run(
+        f"TRUNCATE TABLE {full_table_name}"
     )
 
     sql = f"""
@@ -236,37 +196,33 @@ def copy_parquet_to_raw(dataset):
         )
         MATCH_BY_COLUMN_NAME = CASE_INSENSITIVE
         ON_ERROR = ABORT_STATEMENT
+        FORCE = TRUE
     """
 
     print(f"Loading: {stage_path}")
     print(f"Target table: {full_table_name}")
 
-    hook = SnowflakeHook(
-        snowflake_conn_id="snowflake_default"
-    )
-
     hook.run(sql)
 
-    print(f"Loaded data into: {full_table_name}")
+    print(
+        f"Loaded data into: {full_table_name}"
+    )
 
-    return [dataset]
+    return [{
+        **dataset,
+        "full_table_name": full_table_name,
+    }]
 
 
 def validate_raw_load(dataset):
     """
-    Verify that Snowflake contains the same number of rows
-    as the source CSV/Parquet dataset.
+    Validate RAW table row count.
     """
 
     full_table_name = dataset["full_table_name"]
-
     expected_rows = dataset["row_count"]
 
-    hook = SnowflakeHook(
-        snowflake_conn_id="snowflake_default"
-    )
-
-    result = hook.get_first(
+    result = get_snowflake_hook().get_first(
         f"SELECT COUNT(*) FROM {full_table_name}"
     )
 
@@ -278,7 +234,8 @@ def validate_raw_load(dataset):
 
     if actual_rows != expected_rows:
         raise ValueError(
-            f"Row count mismatch for {full_table_name}: "
+            f"Row count mismatch for "
+            f"{full_table_name}: "
             f"expected={expected_rows}, "
             f"actual={actual_rows}"
         )
